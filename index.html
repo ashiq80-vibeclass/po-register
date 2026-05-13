@@ -2011,7 +2011,20 @@ async function loadData(silent=false) {
   }
 
   updateCustList();
-  renderAll();
+
+  // Find currently active tab and re-render it
+  const activeTab = document.querySelector('.sec.active');
+  if (activeTab) {
+    const tabId = activeTab.id;
+    if (tabId === 'register')     renderTable();
+    if (tabId === 'analytics')    { try { renderAnalytics(); } catch(e){} }
+    if (tabId === 'by-principal') { try { renderPrincipal(); } catch(e){} }
+    if (tabId === 'by-customer')  { try { renderCustomer();  } catch(e){} }
+  } else {
+    renderAll();
+  }
+  updateStats();
+
   if (!silent) setSyncing(false);
 }
 
@@ -2083,8 +2096,10 @@ function animNum(id, val) {
   el.textContent = val;
 }
 function updateStats() {
+  if (!document.getElementById('s-total')) return;
   animNum('s-total', data.length);
-  document.getElementById('s-val').textContent = 'PKR ' + fmt(data.reduce((s,r)=>s+Number(r.amount),0));
+  const valEl = document.getElementById('s-val');
+  if (valEl) valEl.textContent = 'PKR ' + fmt(data.reduce((s,r)=>s+Number(r.amount),0));
   animNum('s-rem', data.filter(r=>r.po_status==='remaining').length);
   animNum('s-inv', data.filter(r=>r.inv_status==='pending').length);
   updateLoginPreview();
@@ -2095,10 +2110,14 @@ function renderAll() { updateStats(); renderTable(); }
 //  TABLE
 // ────────────────────────────────────────────
 function filtered() {
-  const q=(document.getElementById('sq').value||'').toLowerCase();
-  const fp=document.getElementById('fp').value;
-  const fps=document.getElementById('fps').value;
-  const fis=document.getElementById('fis').value;
+  const sqEl  = document.getElementById('sq');
+  const fpEl  = document.getElementById('fp');
+  const fpsEl = document.getElementById('fps');
+  const fisEl = document.getElementById('fis');
+  const q   = (sqEl  ? sqEl.value  : '').toLowerCase();
+  const fp  =  fpEl  ? fpEl.value  : '';
+  const fps =  fpsEl ? fpsEl.value : '';
+  const fis =  fisEl ? fisEl.value : '';
   return data.filter(r=>{
     const m=!q||(r.po+r.customer+r.principal+(r.remarks||'')).toLowerCase().includes(q);
     return m&&(!fp||r.principal===fp)&&(!fps||r.po_status===fps)&&(!fis||r.inv_status===fis);
@@ -2128,11 +2147,15 @@ function renderTable() {
   tblBody.innerHTML = rows.map(r => {
     const editable = canEdit(r);
     const byName   = r.addedBy || 'system';
-    const uInfo    = USER_BY_NAME[byName] || Object.values(AUTH).find(u=>u.name===byName);
-    const initials = uInfo ? uInfo.initials : (byName==='system'?'SYS':byName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase());
-    const avBg     = uInfo ? uInfo.bg : '#f1f5f9';
-    const avCol    = uInfo ? uInfo.col : '#64748b';
-    const firstName= uInfo ? uInfo.name.split(' ')[0] : byName;
+    const uInfo    = USER_BY_NAME[byName]
+                  || Object.values(AUTH).find(u=>u.fullName===byName)
+                  || Object.values(AUTH).find(u=>(u.fullName||'').split(' ')[0]===byName.split(' ')[0]);
+    const initials = uInfo
+                  ? (uInfo.initials || makeInitials(uInfo.fullName))
+                  : (byName==='system'?'SYS':byName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase());
+    const avBg     = uInfo ? (uInfo.bg  || '#ede9fe') : '#f1f5f9';
+    const avCol    = uInfo ? (uInfo.col || '#6d28d9') : '#64748b';
+    const firstName= uInfo ? (uInfo.fullName||byName).split(' ')[0] : byName;
 
     return `<tr class="${r.sr===lastNewSr?'new-row':''}">
       <td style="color:var(--text2);font-family:var(--mono);font-size:11px;font-weight:700">${r.sr}</td>
