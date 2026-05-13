@@ -91,10 +91,30 @@ body::before {
    PAGES
 ═══════════════════════════════════════════ */
 .page { display: none; }
-#login-page       { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(340px,460px); min-height: 100vh; }
-#login-page.hidden { display: none !important; }
-#app-page         { display: none; flex-direction: column; min-height: 100vh; }
-#app-page.visible { display: flex !important; }
+#session-loader { display: flex; }
+#login-page         { display: none; grid-template-columns: minmax(0,1.2fr) minmax(340px,460px); min-height: 100vh; }
+#login-page.visible { display: grid !important; }
+#login-page.hidden  { display: none !important; }
+#app-page          { display: none; flex-direction: column; min-height: 100vh; }
+#app-page.visible  { display: flex !important; }
+#session-loader    {
+  position:fixed;inset:0;background:var(--bg);z-index:9999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+}
+#session-loader .sl-icon {
+  width:56px;height:56px;border-radius:16px;
+  background:linear-gradient(135deg,var(--accent),#6366f1);
+  display:grid;place-items:center;font-size:26px;
+  box-shadow:0 4px 20px rgba(34,211,238,.3);
+}
+#session-loader .sl-text { font-size:14px;color:var(--text2);font-weight:600; }
+#session-loader .sl-spinner {
+  width:32px;height:32px;border-radius:50%;
+  border:3px solid rgba(34,211,238,.2);
+  border-top-color:var(--accent);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ═══════════════════════════════════════════
    LOGIN — BRAND PANE
@@ -828,7 +848,15 @@ tfoot td {
 <!-- ═══════════════════════════════════════════
      LOGIN PAGE
 ═══════════════════════════════════════════ -->
-<div id="login-page" class="page active">
+<!-- Session Loading Screen -->
+<div id="session-loader" style="position:fixed;inset:0;background:#062e38;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px">
+  <div style="width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#22d3ee,#6366f1);display:grid;place-items:center;font-size:26px;box-shadow:0 4px 20px rgba(34,211,238,.3)">📋</div>
+  <div style="font-size:14px;color:#94d4e4;font-weight:600;font-family:Inter,sans-serif">Loading PO Register...</div>
+  <div style="width:32px;height:32px;border-radius:50%;border:3px solid rgba(34,211,238,.2);border-top-color:#22d3ee;animation:spin .8s linear infinite"></div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+</div>
+
+<div id="login-page" class="page">
 
   <!-- Brand / left pane -->
   <section class="lp-brand">
@@ -1674,6 +1702,7 @@ async function doLogin() {
   noticeEl.style.display = 'block';
   btn.textContent        = 'Opening...';
   setTimeout(function() {
+    document.getElementById('login-page').classList.remove('visible');
     document.getElementById('login-page').classList.add('hidden');
     document.getElementById('app-page').classList.add('visible');
     initApp();
@@ -1705,42 +1734,53 @@ function doLogout() {
   // Switch pages
   document.getElementById('app-page').classList.remove('visible');
   document.getElementById('login-page').classList.remove('hidden');
+  document.getElementById('login-page').classList.add('visible');
   if (loggedOutName) showToast('info', 'Signed Out', `${loggedOutName} has been signed out successfully.`);
 }
 
-// ── Session restore on page load ─────────────────────
-// If user checked "Keep me signed in", skip login entirely
-(async function restoreSession(){
+// ── Session restore — runs after full page load ───────
+window.addEventListener('load', async function() {
+  const loader   = document.getElementById('session-loader');
+  const loginPg  = document.getElementById('login-page');
+  const appPg    = document.getElementById('app-page');
+
   const savedUser = localStorage.getItem('po_session_user');
   const savedTime = parseInt(localStorage.getItem('po_session_time') || '0');
-  const SESSION_DAYS = 30; // stay logged in for 30 days
-  const SESSION_MS   = SESSION_DAYS * 24 * 60 * 60 * 1000;
+  const SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
   const sessionValid = savedUser && (Date.now() - savedTime < SESSION_MS);
 
   if (sessionValid) {
-    // Load users from Firebase first, then auto-login
-    await loadUsers();
-    if (AUTH[savedUser]) {
-      cu = savedUser;
-      // Refresh session timestamp
-      localStorage.setItem('po_session_time', Date.now().toString());
-      // Skip login page, go straight to app
-      document.getElementById('login-page').classList.add('hidden');
-      document.getElementById('app-page').classList.add('visible');
-      initApp();
-      return;
+    try {
+      // Load Firebase users first
+      await loadUsers();
+      if (AUTH[savedUser]) {
+        cu = savedUser;
+        localStorage.setItem('po_session_time', Date.now().toString());
+        // Hide loader, show app directly
+        if (loader)  loader.style.display = 'none';
+        if (loginPg) loginPg.classList.remove('visible');
+        if (appPg)   appPg.classList.add('visible');
+        initApp();
+        return;
+      }
+    } catch(e) {
+      console.warn('Session restore failed:', e);
     }
   }
 
-  // No valid session — show login page, auto-fill username if remembered
+  // No valid session — show login page
+  if (loader)  loader.style.display = 'none';
+  if (loginPg) loginPg.classList.add('visible');
+
+  // Auto-fill username if remembered
   const remUser = localStorage.getItem('po_remembered');
   if (remUser) {
-    const uEl = document.getElementById('lf-user');
+    const uEl  = document.getElementById('lf-user');
     const remEl = document.getElementById('lf-remember');
     if (uEl)  uEl.value = remUser;
     if (remEl) remEl.checked = true;
   }
-})();
+});
 
 // ────────────────────────────────────────────
 //  SEED DATA
