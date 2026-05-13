@@ -1658,8 +1658,15 @@ async function doLogin() {
 
   try {
     var rem = document.getElementById('lf-remember');
-    if (rem && rem.checked) localStorage.setItem('po_remembered', u);
-    else localStorage.removeItem('po_remembered');
+    if (rem && rem.checked) {
+      localStorage.setItem('po_remembered',   u);
+      localStorage.setItem('po_session_user', u);
+      localStorage.setItem('po_session_time', Date.now().toString());
+    } else {
+      localStorage.removeItem('po_remembered');
+      localStorage.removeItem('po_session_user');
+      localStorage.removeItem('po_session_time');
+    }
   } catch(e) {}
 
   cu = u;
@@ -1679,12 +1686,17 @@ document.addEventListener('keydown', function(e) {
 });
 
 function doLogout() {
-  const loggedOutName = AUTH[cu] ? AUTH[cu].name : '';
+  const loggedOutName = AUTH[cu] ? AUTH[cu].fullName : '';
   try { safeStorage.delete('presence_' + cu); } catch(e) {}
   clearInterval(syncTimer);
   clearInterval(presenceTimer);
   syncTimer = null; presenceTimer = null;
   cu = '';
+  // Clear session so next refresh shows login
+  try {
+    localStorage.removeItem('po_session_user');
+    localStorage.removeItem('po_session_time');
+  } catch(e) {}
   // Reset form
   try { document.getElementById('lf-user').value = ''; document.getElementById('lf-pass').value = ''; } catch(e){}
   try { document.getElementById('lf-notice').style.display = 'none'; document.getElementById('lf-error').style.display = 'none'; } catch(e){}
@@ -1696,16 +1708,37 @@ function doLogout() {
   if (loggedOutName) showToast('info', 'Signed Out', `${loggedOutName} has been signed out successfully.`);
 }
 
-// Auto-fill if remembered
-(function(){
-  const rem = localStorage.getItem('po_remembered');
-  // Legacy key migration
-  const legacyMap = {aa:'ashiq',mr:'ramzan',kh:'kazim'};
-  const resolvedRem = legacyMap[rem] || rem;
-  if (resolvedRem && AUTH[resolvedRem]) {
-    localStorage.setItem('po_remembered', resolvedRem);
-    document.getElementById('lf-user').value = resolvedRem;
-    document.getElementById('lf-remember').checked = true;
+// ── Session restore on page load ─────────────────────
+// If user checked "Keep me signed in", skip login entirely
+(async function restoreSession(){
+  const savedUser = localStorage.getItem('po_session_user');
+  const savedTime = parseInt(localStorage.getItem('po_session_time') || '0');
+  const SESSION_DAYS = 30; // stay logged in for 30 days
+  const SESSION_MS   = SESSION_DAYS * 24 * 60 * 60 * 1000;
+  const sessionValid = savedUser && (Date.now() - savedTime < SESSION_MS);
+
+  if (sessionValid) {
+    // Load users from Firebase first, then auto-login
+    await loadUsers();
+    if (AUTH[savedUser]) {
+      cu = savedUser;
+      // Refresh session timestamp
+      localStorage.setItem('po_session_time', Date.now().toString());
+      // Skip login page, go straight to app
+      document.getElementById('login-page').classList.add('hidden');
+      document.getElementById('app-page').classList.add('visible');
+      initApp();
+      return;
+    }
+  }
+
+  // No valid session — show login page, auto-fill username if remembered
+  const remUser = localStorage.getItem('po_remembered');
+  if (remUser) {
+    const uEl = document.getElementById('lf-user');
+    const remEl = document.getElementById('lf-remember');
+    if (uEl)  uEl.value = remUser;
+    if (remEl) remEl.checked = true;
   }
 })();
 
@@ -1888,7 +1921,8 @@ async function loadData(silent=false) {
       updateCustList(); renderAll();
     }
   } catch(e) {
-    if (!data.length) { data = SEED.map(x=>({...x,addedBy:'system',addedAt:''})); renderAll(); }
+    if (!data.length) { data = SEED.map(x=>({...x,addedBy:'system',addedAt:''})); }
+  renderAll(); // Always re-render after load to ensure list is visible
   }
   if (!silent) setSyncing(false);
 }
@@ -2280,8 +2314,20 @@ async function saveNewPO() {
   showToast('info','DC Followup Updated',`Customer "${customer}" · PO "${po}" auto-added to DC Followup tab.`);
   showSaveMsg(`✅ PO saved! Sr. ${nextSr} — ${po}`,'ok');
   showToast('add','PO Added!',`Sr. ${nextSr} — "${po}" · ${customer} (PKR ${fmt(amount)})`);
-  clearNewForm(); renderAll();
-  setTimeout(()=>{ lastNewSr=-1; },3500);
+  clearNewForm();
+  // Switch to Register tab so user sees the new entry immediately
+  setTimeout(() => {
+    showTab('register');
+    renderAll();
+    // Highlight the new row
+    setTimeout(() => {
+      const rows = document.querySelectorAll('#po-table-body tr');
+      rows.forEach(r => {
+        if (r.dataset.sr == nextSr) r.classList.add('new-row');
+      });
+      lastNewSr = -1;
+    }, 400);
+  }, 1200);
 }
 
 function clearNewForm() {
